@@ -1,0 +1,1024 @@
+---
+title: "qPCR - Analysis"
+author: "Arturo Marroquín"
+date: "`r Sys.Date()`"
+output: html_document
+bibliography: references.bib
+csl: nature.csl
+---
+<style>
+body {
+text-align: justify}
+</style>
+
+# Background
+
+Quantitative real-time polymerase chain reaction (qPCR) can be used for different 
+purposes, however, in the context of genetics it is often used to estimate 
+differences in the expression of particular genes. Notably, high throughput 
+sequencing technologies often include this method in their pipelines in order
+to increase the starting material and improve detection [@Riedel2014].
+
+Two different strategies can be thought of when it comes to running qPCR experiments. 
+In a less frequent scenario a standard curve is utilized to estimate the "exact" 
+initial quantity of a particular gene. This method is known as absolute quantification.
+In some qPCR experiments, a standard curve is generated using known concentrations
+of a reference DNA. The Ct values of these standards are used to create a linear 
+regression line, which is then used to estimate the initial amount of target DNA
+in the experimental samples. Conversely, relative quantification estimates the 
+expression of specific target gene(s) in specific conditions (known as treatment group) 
+relative to a reference gene (known as housekeeping genes) and a reference sample 
+(frequently labeled as the control group) [@Arya2005]^,^[@Rao2013].
+
+## Biological concepts
+
+### Gene expression
+
+A gene is expressed in accordance to its transcription rate of a particular cell
+or group of cells. The latter is thought to match the function of such cell and
+to satisfactorily represent its phenotype. 
+
+### qPCR: molecular basis
+
+In qPCR, an initial amount of DNA material is amplified in exactly the same way
+that traditional PCR works. The big difference is that qPCR incorporates real-time
+monitoring of the amplification process. At the core of the rational behind qPCR
+lies the relationship between the amount of starting target sequence(s) and the 
+amount of produced material through a specific (and known) number of amplification 
+cycles. 
+
+These cycles represent the molecular basis of qPCR and can be described through
+key steps of 15-30 seconds each:
+
+1- *DNA denaturation*
+
+In which, the high temperature (~95°C) causes the double-stranded DNA in the
+template to separate into two single strands, breaking hydrogen bonds and
+exposing the target region for amplification.
+
+2- *Primer annealing*
+
+In which, at lowr temperatures (50-65°C) primers (short DNA sequences) designed
+to be complementary to the target region anneal to their respective sites on the
+single-stranded DNA.
+
+3- *DNA extension (Elongation)*
+
+Herein, DNA polymerase synthesizes a complementary DNA strand by adding nucleotides
+to the 3' end of each primer, extending the sequence. At the end of this phase, a 
+fluorescent dye or probe specific to the amplified DNA binds to the newly synthesized
+DNA. Finally, Fluorescence emission is detected using a detector (fluorometer).
+
+
+## Data acquisition and analysis
+
+The fluorescence intensity is recorded at the end of each cycle and this variable
+is used to estimate the expression in downstream analysis. There are some characteristics
+of this fluorescence that are noteworthy. 
+
+For starters, the amplification line follows a sigmoidal-like behavior. but both
+the beginning and the end of the curve are not reliable. At the beginning, there
+is a relative absence of amplification due to the low amount of DNA which results
+in a fluorescence signal indistinguishable  from background noise. Moreover, the
+DNA polymerase may be still in the process of activation and the primers are just
+binding to the template DNA. On the other hand, at the end there are no reagents
+left which leads to a plateau. A typical behavior can be observed in **Figure 1A**. 
+Usually, as part of the initial quality check and data processing a baseline is 
+taken into account to adjust the fluorescence signal which becomes then $\Delta Rn$. 
+The transformation is depicted in **figure 1B**. 
+
+
+\
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.align='center',  fig.width=12, fig.height=6}
+library(ggplot2)
+library(truncnorm)
+library(ggpubr)
+set.seed(2)
+# Generate x values
+x_values <- seq(0, 40, length.out = 120)
+# Set parameters for different groups
+group_parameters <- data.frame(
+  Group = c("Group A", "Group B", "Group C","Group D"),
+  L = c(1, 1, 1, 1),
+  k = c(0.4, 0.4, 0.38, 0.41),
+  x0 = c(19, 18, 16, 20),
+  variability_sd = c(0.001, 0.0015, 0.0012, 0.0001)
+)
+# Initialize an empty data frame to store the results
+simulated_data <- data.frame(x = rep(x_values, length(group_parameters$Group)),
+                             Group = rep(group_parameters$Group, each = length(x_values)),
+                             y = numeric(length = 480))
+
+# Define the modified sigmoidal function
+sigmoidal <- function(x, L, k, x0) {
+  L / (1 + exp(-k * (x - x0)))
+}
+# Function to simulate a sigmoidal curve with variability
+simulate_sigmoidal_curve <- function(x_values, L, k, x0, variability_sd) {
+  sigmoidal_curve <- sigmoidal(x_values, L, k, x0)
+  sigmoidal_curve
+}
+
+simulate_sigmoidal_curve_2 <- function(x_values, L, k, x0, variability_sd) {
+  sigmoidal_curve <- sigmoidal(x_values, L, k, x0)
+  sigmoidal_curve[1:25] <- rtruncnorm(n=25, a=0, b=0.5, mean=0.05, sd=0.05)
+  sigmoidal_curve[25:30]<- rtruncnorm(n=5, a=0.04, b=0.5, mean=0.06, sd=0.02)
+  sigmoidal_curve
+}
+
+simulated_data_2 <- simulated_data
+
+# Simulate sigmoidal curves for each group and store in the data frame
+for (i in 1:nrow(group_parameters)) {
+  curve_data <- data.frame(x = x_values,
+                           Group = rep(group_parameters$Group[i], length(x_values)),
+                           y = simulate_sigmoidal_curve(x_values, 
+                                                       group_parameters$L[i], 
+                                                       group_parameters$k[i], 
+                                                       group_parameters$x0[i], 
+                                                       group_parameters$variability_sd[i]))
+  simulated_data <- rbind(simulated_data, curve_data)
+}
+
+# Simulate sigmoidal curves for each group and store in the data frame
+for (i in 1:nrow(group_parameters)) {
+  curve_data_2 <- data.frame(x = x_values,
+                           Group = rep(group_parameters$Group[i], length(x_values)),
+                           y = simulate_sigmoidal_curve_2(x_values, 
+                                                       group_parameters$L[i], 
+                                                       group_parameters$k[i], 
+                                                       group_parameters$x0[i], 
+                                                       group_parameters$variability_sd[i]))
+  simulated_data_2 <- rbind(simulated_data_2, curve_data_2)
+}
+
+# Plot the simulated curves
+figure_1A <- ggplot(simulated_data[simulated_data$y!=0,], aes(x = x, y = y, color = Group)) +
+  geom_line(size = 1.0) +
+  labs(title = "A.",
+       x = "Cycles",
+       y = "Fluorescence signal") +
+  theme_classic()+
+  theme(axis.title.x = element_text(size=14))+
+  theme(axis.title.y = element_text(size=14, vjust = 2))+
+  theme(axis.text.x = element_text(size = 13))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(plot.title = element_text(size=14, face = "bold"), 
+        legend.text = element_text(size=13), 
+        legend.title =element_text(size=13, face = "bold"))
+
+# Plot the simulated curves
+figure_1B<- ggplot(simulated_data_2[simulated_data_2$y!=0,], aes(x = x, y = y, color = Group)) +
+  geom_line(size = 1.0) +
+  labs(title = "B.",
+       x = "Cycles",
+       y = expression(paste(Delta,"Rn"," (Fluorescence signal)")))+
+  theme_classic()+
+  theme(axis.title.x = element_text(size=14))+
+  theme(axis.title.y = element_text(size=14, vjust = 2))+
+  theme(axis.text.x = element_text(size = 13))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(plot.title = element_text(size=14, face = "bold"), 
+        legend.text = element_text(size=13), 
+        legend.title =element_text(size=13, face = "bold"))
+
+
+plot1<- ggarrange(figure_1A,figure_1B, common.legend = T, legend = "bottom")
+
+annotate_figure(plot1, top = text_grob("Figure 1. Amplification plot for 4 different groups", 
+               color = "black", face = "bold", size = 15, vjust = 0.2))
+
+
+```
+
+### Delta delta method
+
+Essentially, a threshold cycle (Ct) is established as the cycle at which the fluorescence 
+reaches certain value that represent a reliable increase in the amount of the gene (amplicons).
+In other words, when the fluorescent signal is significantly above the background signal.
+And, of paramount importance: ***the Ct is inversely proportional*** to the original
+relative expression level of the gene of interest. 
+
+Specifically, in ThermoFisher the Cq, which is the cycle established as the threshold, can correspond
+either to Ct or Crt. In the first case, Ct is determined through the baseline threshold
+algorithm, whereas, the Crt is the result of the Relative Threshold algorithm. 
+
+The baseline threshold algorithm is an expression estimation algorithm that subtracts
+a baseline component and sets a fluorescence threshold in the exponential region, which
+can be observed in *Figure 1*. First, a baseline is determined as the background noise
+level from the initial cycles (before the amplification occurs). This is done with the 
+help of a control reporter dye and it corresponds to the average of fluorescence signal
+over the cycles defined to be in the initial phase of the plot. In *Figure 1* we selected
+10 cycles. In theory, this initial phase ends in beginning of the exponential phase
+of the amplification curve. Indeed, the Ct is defined as the cycle in which the fluorescence
+level goes above the previously defined level [@Li2022]. 
+
+On the other hand, the relative threshold algorithm estimates a threshold for each
+curve individually and it does it based on the shape of the amplification curve, 
+independently from the baseline fluorescence. For more details check [ref].
+
+The Ct is, no brainer, at the very core of the $-\Delta \Delta Ct $ method. In 
+mathematics $\Delta$ frequently represents a difference, just as it does in this 
+case. Remember that our objective is to estimate the relative quantification of 
+a gene in comparison to a reference gene (housekeeping genes). To do so we will
+determine the differences between the differences (not repeated) between Ct of a
+target gene and the Ct of a housekeeping gene in a target sample relative to a control
+sample. This can of course be divided into two steps:
+
+1- *First difference ($\Delta Ct$)*
+
+This corresponds to the difference between the Ct of a target gene and a housekeeping gene. So, 
+**within each treatment group (condition, level of a factor, etc.) of interest:**
+
+$$\Delta Ct=Ct\:\: of \:a\:target\:gene\:-Ct\:\: of \:a\:housekeeping\:gene\:$$
+
+2- *Second difference ($\Delta \Delta Ct$)*
+
+This corresponds to the difference between the $\Delta Ct$ of the 
+**treatment of interest and the** $\Delta Ct$ of the **reference group**.
+A difference in differences. 
+
+3- *power up the difference of differences ($2^{-\Delta \Delta Ct}$)*
+
+Finally we exponentiate $2$ to the $-\Delta \Delta Ct$ which serves as an estimation
+of the relative quantification of the target gene in the target condition in comparison
+to the control condition taking into account the amount of a housekeeping gene. 
+
+The exponential function is denoted by $f(x) = exp(x)$ or $e^x$ where $x$ is 
+an exponent and $e$ is the base number. There are some properties of this measure
+that are worth mentioning to grasp the logic behind using it in this context. 
+
+Firstly, when we assume that the efficiency of the qPCR is $100%$, which is what 
+most researchers do when analyzing relative quantification, the initial material
+would double after each cycle and this would be adequately captured by the exponential
+expression $2^n$. This can be seen in *Figure 2.A*.
+
+Secondly, to ease the graphical representation of the the amplification many softwares
+produce figures in which the fluorescence (which serves as an approximation of the
+quantity of the genetic material) is transformed to a logarithmic scale. Just, 
+as a reminder (or an useful note) the logarithmic scaleis somewhat the opposite of
+the exponential one when the base number is shared $(exp\:(1)\approx2.72 \:and\:log\:(2.72)\approx1)$.
+That is why when we plot the amplification curve using a **log base 2** transformation
+of the material we get *Figure 2.C* with $y=x$.
+
+\
+
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=12, message=FALSE, warning=FALSE}
+powertwofunction <- function(L=2,n){
+  L^n
+}
+
+powerdf <- data.frame(cycles=seq(1:40),
+           material_amount=powertwofunction(2,seq(1:40)),
+           log_material_amount=log(powertwofunction(2,seq(1:40))),
+           log2_material_amount=log2(powertwofunction(2,seq(1:40))))
+
+# Plot the simulated curves
+figure_2A<- ggplot(powerdf, aes(x = cycles, y = material_amount)) +
+  geom_line(size = 1.0) +
+  geom_point()+
+  labs(title = "A.",
+       x = "Cycles",
+       y = "Amount of material")+
+  theme_classic()+
+  theme(axis.title.x = element_text(size=14))+
+  theme(axis.title.y = element_text(size=14, vjust = 2))+
+  theme(axis.text.x = element_text(size = 13))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(plot.title = element_text(size=14, face = "bold"), 
+        legend.text = element_text(size=13), 
+        legend.title =element_text(size=13, face = "bold"))
+
+figure_2B<- ggplot(powerdf, aes(x = cycles, y = log_material_amount)) +
+  geom_line(size = 1.0) +
+  geom_point()+
+  labs(title = "B.",
+       x = "Cycles",
+       y = "Log(Amount of material)")+
+  theme_classic()+
+  theme(axis.title.x = element_text(size=14))+
+  theme(axis.title.y = element_text(size=14, vjust = 2))+
+  theme(axis.text.x = element_text(size = 13))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(plot.title = element_text(size=14, face = "bold"), 
+        legend.text = element_text(size=13), 
+        legend.title =element_text(size=13, face = "bold"))
+
+figure_2C<- ggplot(powerdf, aes(x = cycles, y = log2_material_amount)) +
+  geom_line(size = 1.0) +
+  geom_point()+
+  labs(title = "C.",
+       x = "Cycles",
+       y = "Log2(Amount of material)")+
+  theme_classic()+
+  theme(axis.title.x = element_text(size=14))+
+  theme(axis.title.y = element_text(size=14, vjust = 2))+
+  theme(axis.text.x = element_text(size = 13))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(plot.title = element_text(size=14, face = "bold"), 
+        legend.text = element_text(size=13), 
+        legend.title =element_text(size=13, face = "bold"))
+
+plot2<- ggarrange(figure_2A,figure_2B, figure_2C, ncol = 3)
+annotate_figure(plot2,
+                top = text_grob(expression(paste("Figure 2. ",2^n, " Material increase throughout 40 cycles ")), color = "black", face = "bold", size = 15, vjust = 0.5))
+```
+
+Finally, derived from the first aspect that we mentioned, exponentiating 2 to the
+power of the difference $(\Delta \Delta Ct)$ will estimate a value of material
+in a target gene when the housekeeping value is one. One because dividing two exponentials
+expressions with the same base leads to subtract the two exponents and leave the base 
+number as such. Then, using 2 as the base number, exponentiating to $(\Delta \Delta Ct)$
+is the same as saying $\frac{2^{\Delta Ct\:[In\:target\:condition]}}{2^{\Delta Ct\:[In\:control\:condition]}}$.
+The latter corresponds to a ratio and in the ratio world 1 represents equality (as oppose to 0 in the subtraction world).
+And, as we are subtracting in both the numerator and the denominator the amount of housekeeping gene,
+this quantification are relative to those values (which will be equal to 1). The last point
+concerns the minus symbol. This is established as such because, as we mentioned above, 
+***the Ct is inversely proportional*** to the original relative expression level of the 
+genetic material. So, a greater positive difference implies lesser starting quanitty of
+the target gene. The minus will invert this interpretation. 
+
+### Statistical analysis
+
+How to analyse the data to identify "*significant*" differences between the quantity
+of specific genes in specific conditions relative to a control is a heated debate 
+(although by only a few).Even which variable should be explored is not straight forward. 
+Although most research papers perform ANOVA or t-tests and adjust by multiple 
+comparisons on the relative quantification values there are various reasons that
+make other alternatives perhaps more suited to do such analyses [Yuan]. Although take
+a look at [Levik].
+
+Just to establish a clear context, there are two main models that are used to estimate
+the relative quantification: the efficiency calibrated model (Introduced by Michael Pfaffl)
+and the $(\Delta \Delta Ct)$ model. However, the former is a more generalized model
+of the second [Yuan]. Indeed, in the efficiency calibrated model the relative 
+quantification is estimated as follows:
+
+$$Relative\:quantification\:=\frac{(Efficiency\:\:in\:\:target\:\:gene)^{\:\:\Delta CT_{\:target\:gene}}}{(Efficiency\:\:in\:\:reference\:\:gene)^{\:\:\Delta CT_{\:reference\:gene}}}$$
+Thus, if the efficiencies are equal, due the properties of the ratios of exponential
+functions, the relative quantification would be equal to the base number(in this 
+case 2 because the efficiency is "perfect" and the material doubles each cycle) 
+exponentiated to the power of the subtractions of the two exponents, a.k.a
+$2^{\Delta CT_{Target} - \Delta CT_{reference}}$ which is the same as $2^{\Delta \Delta CT}$.
+
+The Pfaffl model, however, requires a step to determine the efficiency, which in turn, 
+requires to run a series of dilutions and determine the standard curve. Although, this
+is recommended it is of course more demanding. Therefore, most qPCR are intended to
+be analysed without knowing the efficiencies but assuming they are equal (polemic). 
+
+Once you obtained the CT values you can already perform the analyses. No need to perform
+any additional transformation, however, some like to show plots of the relative quantification
+in different logarithmic scales. As long are the stats are correctly done (or at least the choices
+justified) it really does not matter how you choose to present your data. 
+
+Classically, relative quantification measures are compared through t-tests and ANOVA, 
+nonetheless, personally, I consider that a regression strategy can increase the power and
+the efficiency of the analysis and that to perform it using the untransformed CT values is
+quite enough. In particular mixed models might be an interesting alternative. Linear if you
+assume (or prove) that your independent variable follows a normal distribution (although
+more importantly, the normality should be checked on the residual and the pertinence of
+the model should be evaluated through a diagnostic process). On the other hand, generalized
+linear mixed models can be a more flexible tool when is hard to compromise with these assumptions. 
+
+Noteworthy, the way we analyse the data depends on, well, the data and its complexity. If your design 
+is straight forward and there is no reason to think that different wells are correlated, then, a simple
+regression would do the job. 
+
+Now we will see a real case study and analyse the data generated by the thermofisher machine. 
+
+# Case study with R
+
+Description of the case:
+
+```{r message=FALSE, warning=FALSE}
+# This sets the directory in which my xls files, produced by thermo, are stored
+setwd("C:/Users/artur/OneDrive/Escritorio/HNeruStres/Qpcr/")
+```
+
+
+##### Loading packages
+
+```{r message=FALSE, warning=FALSE}
+# Loading necessary packages 
+library(ggplot2)# For plots
+library(forcats)# Data shaping
+library(readxl)# To import files
+library(dplyr)# Data manipulation
+```
+
+##### Importing and preparing data for analysis
+
+```{r}
+# Creating the data.frame
+
+# 1) Importing the 4 files corresponding to the 4 runs of the PCR machine
+trial1 <- read_excel("Comparative-Ct-SYBR-1.xls", sheet = "Results", skip = 37,n_max = 385)
+trial2 <- read_excel("Comparative-Ct-SYBR-2.xls", sheet = "Results", skip = 37,n_max = 193)
+trial3 <- read_excel("Comparative-Ct-SYBR-2.xls", sheet = "Results", skip = 37,n_max = 49)
+trial4 <- read_excel("Comparative-Ct-SYBR-2.xls", sheet = "Results", skip = 37,n_max = 37)
+# 2)  Selecting only three variables of interest 
+# "Sample Name" (in this case corresponds to the genes)
+# "Target Name" (in this case corresponds to the conditions)
+# "CT" (value generated by the Quantstudio analysis through the basline threshold algorithm)
+# And finally, we add a batch variable for every run of the machine.
+qPCR1 <- trial1[c(4,5,15)];qPCR1$batch <- "SYBR1"
+qPCR2 <- trial2[c(4,5,15)];qPCR2$batch <- "SYBR2"
+qPCR3 <- trial3[c(4,5,15)];qPCR3$batch <- "SYBR3"
+qPCR4 <- trial4[c(4,5,15)];qPCR4$batch <- "SYBR4"
+# 3) Preparing the data.frame to work with.
+# We append the four data.frames into a big one ("qPCR")
+qPCR<- rbind(qPCR1,qPCR2,qPCR3,qPCR4)
+# We create a condition variable merging all the biological replicates (3 per condition)
+qPCR$condition <- gsub('[[:digit:]]+', '', qPCR$`Target Name`)
+# Rename the variables for the ease of the manipulation
+names(qPCR)[c(1,2)] <- c("Sample","Target")
+# Fixing some typos
+qPCR$condition[qPCR$condition=="estrodial"] <- "estradiol"
+qPCR$condition[qPCR$condition=="progesterone "] <- "progesterone"
+qPCR$condition[qPCR$condition=="estrodial"] <- "estradiol"
+qPCR$Sample[qPCR$Sample=="INF"] <- "IFN"
+```
+
+##### Applying the Delta delta method
+
+Given that we have a lot of conditions with several replicates we are going to
+generate summary statistics per gene for every condition. For instance, we determine the mean 
+and the standard deviation of the Ct values of GAPDH accross replicates in non-treated (NT)
+wells, as well as in the Dexamethasone (Dex) treated wells and so forth. 
+
+
+```{r}
+# Generate statistics per target per group 
+qPCR <- qPCR %>% left_join(aggregate(CT ~ condition+Sample, qPCR, mean), by= c("condition", "Sample"))
+qPCR <- qPCR %>% left_join(aggregate(CT.x ~ condition+Sample, qPCR, sd), by= c("condition", "Sample"))
+names(qPCR)[c(3,6,7)] <- c("CT","mean","sd"); qPCR_pruned <- qPCR[,c(-2,-3,-4)][!duplicated(qPCR[,c(-2,-3,-4)]),]
+```
+
+Subsequently, we calculate the $\Delta Ct$ of the mean of the Ct value in target gene
+in a specific condition in comparison to two housekeeping genes. As the values of
+these two housekeeping genes was very similar we considered that there were no differences
+choosing one or the other as a reference (*Figure 3*). To perform the analysis with several 
+housekeeping genes take a look at paper of Riedel and colleagues [@Riedel2014].
+
+##### Correlation between two housekeeping genes: GAPDH and RPLP0
+
+```{r fig.align='center', fig.height=4, fig.width=6, message=FALSE, warning=FALSE}
+ggplot(qPCR[qPCR$Sample=="GAPDH"|qPCR$Sample=="RPLP0",], aes(x=CT, y=CT, color=condition))+
+geom_point()+
+labs(title = " ",
+       x = "CT",
+       y = "CT")+
+  scale_x_continuous(limits = c(10, 20),breaks=c(seq(10,20,2)))+
+  scale_y_continuous(limits = c(10, 20),breaks=c(seq(10,20,2)))+
+  theme_classic()+
+  theme(axis.title.x = element_text(size=14))+
+  theme(axis.title.y = element_text(size=14, vjust = 2))+
+  theme(axis.text.x = element_text(size = 13))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(plot.title = element_text(size=14, face = "bold"), 
+        legend.text = element_text(size=13), 
+        legend.title =element_text(size=13, face = "bold"))+
+  theme_classic()+
+  facet_wrap(~Sample)
+```
+We chose GAPDH as the reference housekeeping genes, however we calculated the $\Delta Ct$
+for both of them. In this case the mean of the replicates of GAPDH or RPLP0is subtracted
+from the mean of every gene within every condition. 
+
+```{r message=FALSE, warning=FALSE}
+# Calculating Deltas with two references genes
+qPCR_pruned_2 <- qPCR_pruned  %>%
+    group_by(condition) %>%
+    mutate(deltaC_GADPH = mean - mean[Sample == 'GAPDH'])
+
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(condition) %>%
+    mutate(deltaC_RPLP0 = mean - mean[Sample == 'RPLP0'])
+```
+
+We then proceeded to calculate $\Delta \Delta Ct$ for each condition and its corresponding
+control. The latter corresponds to the vehicle used in the administration of the 
+different exposures. For instance, LPS is administered with saline solution and 
+Dihydrotestosterone (DHT) with methanol (MEOH). 
+
+```{r message=FALSE, warning=FALSE}
+# Calculating deltas deltas according to 4 different reference groups
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_d_NT = deltaC_GADPH - deltaC_GADPH[condition=="NT"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_d_ETOH = deltaC_GADPH - deltaC_GADPH[condition=="ETOH"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_d_MEOH = deltaC_GADPH - deltaC_GADPH[condition=="MEOH"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_d_Saline = deltaC_GADPH - deltaC_GADPH[condition=="saline"])
+```
+
+
+As the last step in the $\Delta \Delta Ct$ method we estimate the relative quantification
+exponentiating 2 to the $-\Delta \Delta Ct$ obtained. 
+
+```{r message=FALSE, warning=FALSE}
+# Estimating relative quantification according to the four references
+qPCR_pruned_2$RQ_NT<- 2^-(qPCR_pruned_2$delta_d_NT)  
+qPCR_pruned_2$RQ_ETOH <- 2^-(qPCR_pruned_2$delta_d_ETOH)  
+qPCR_pruned_2$RQ_MEOH <- 2^-(qPCR_pruned_2$delta_d_MEOH)  
+qPCR_pruned_2$RQ_saline <- 2^-(qPCR_pruned_2$delta_d_Saline)  
+```
+
+Given that we want to see the variability of the relative quantification (not necessarily,
+depends on how you perform your statistical analysis) we repeat the process for the 
+standard deviation (upper and lower limits separately). - Controversial I should check
+this-
+
+```{r message=FALSE, warning=FALSE}
+############ VARIABILITY ##########
+qPCR_pruned_2$lower_mean <- qPCR_pruned_2$mean- qPCR_pruned_2$sd
+qPCR_pruned_2$higher_mean <- qPCR_pruned_2$mean + qPCR_pruned_2$sd
+##### Lower_mean ######
+# Calculating Deltas with two references genes
+
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(condition) %>%
+    mutate(deltaC_lower_GADPH = lower_mean - lower_mean[Sample == 'GAPDH'])
+
+# Calculating deltas deltas of sd according to the 4 different reference groups
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_lower_NT_GADPH = deltaC_lower_GADPH - deltaC_lower_GADPH[condition=="NT"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_lower_ETOH_GADPH = deltaC_lower_GADPH - deltaC_lower_GADPH[condition=="ETOH"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_lower_MEOH_GADPH = deltaC_lower_GADPH - deltaC_lower_GADPH[condition=="MEOH"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_lower_Saline_GADPH = deltaC_lower_GADPH - deltaC_lower_GADPH[condition=="saline"])
+
+# Estimating relative quantification according to the four references
+qPCR_pruned_2$RQ_min_NT<- 2^-(qPCR_pruned_2$delta_lower_NT_GADPH)  
+qPCR_pruned_2$RQ_min_ETOH <- 2^-(qPCR_pruned_2$delta_lower_ETOH_GADPH)  
+qPCR_pruned_2$RQ_min_MEOH <- 2^-(qPCR_pruned_2$delta_lower_MEOH_GADPH)  
+qPCR_pruned_2$RQ_min_saline <- 2^-(qPCR_pruned_2$delta_lower_Saline_GADPH)  
+
+##### higher_mean ######
+# Calculating Deltas with two references genes
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(condition) %>%
+    mutate(deltaC_higher_GADPH = higher_mean - higher_mean[Sample == 'GAPDH'])
+
+# Calculating deltas deltas of sd according to the 4 different reference groups
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_higher_NT_GADPH = deltaC_higher_GADPH - deltaC_higher_GADPH[condition=="NT"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_higher_ETOH_GADPH = deltaC_higher_GADPH - deltaC_higher_GADPH[condition=="ETOH"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_higher_MEOH_GADPH = deltaC_higher_GADPH - deltaC_higher_GADPH[condition=="MEOH"])
+qPCR_pruned_2 <- qPCR_pruned_2  %>%
+    group_by(Sample) %>%
+    mutate(delta_higher_Saline_GADPH = deltaC_higher_GADPH - deltaC_higher_GADPH[condition=="saline"])
+
+# Estimating relative quantification according to the four references
+qPCR_pruned_2$RQ_max_NT<- 2^-(qPCR_pruned_2$delta_higher_NT_GADPH)  
+qPCR_pruned_2$RQ_max_ETOH <- 2^-(qPCR_pruned_2$delta_higher_ETOH_GADPH)  
+qPCR_pruned_2$RQ_max_MEOH <- 2^-(qPCR_pruned_2$delta_higher_MEOH_GADPH)  
+qPCR_pruned_2$RQ_max_saline <- 2^-(qPCR_pruned_2$delta_higher_Saline_GADPH)  
+
+```
+
+
+#### Results
+
+Now we check the relative quantification of all the conditions in comparison to 
+the non-treated group. 
+
+```{r message=FALSE, warning=FALSE,fig.align='center', fig.height=6, fig.width=11}
+### 
+qPCR_pruned_2$Sample_fac <- factor(qPCR_pruned_2$Sample, levels = c("GAPDH", "RPLP0", "FKBP5",
+                                                                    "GR","IFN","AR","ER","PR"))
+qPCR_pruned_2$condition_fac <- factor(qPCR_pruned_2$condition, levels = c("NT", "ETOH", "MEOH",
+                                                                    "saline","Dex","LPS","estradiol","DHT",
+                                                                    "progesterone"))
+
+qPCR_pruned_2[qPCR_pruned_2$condition_fac!="NT" & qPCR_pruned_2$condition_fac!="saline" ,] %>%
+  ggplot(aes(x = condition_fac, y=RQ_NT,fill=Sample_fac)) +
+  labs(x = " ")+
+  geom_errorbar(aes(ymin=RQ_min_NT, ymax=RQ_max_NT), width=.6,
+                position=position_dodge(.9))+
+  guides(fill = guide_legend(title = "Genes"))+
+  scale_y_continuous(limits=c(0,6), breaks = c(0,1,2,3,4,5,6))+
+  geom_bar(position="dodge", stat="identity",colour="black") +
+  geom_hline(yintercept = 1,linetype="dashed", color="Red", size=1.1)+
+  scale_y_continuous(limits = c(0,4), expand = c(0, 0)) +
+  theme_classic()+
+  ylab("Relative Quantification")+
+  ggtitle("qPCR analysis relative \n to the non-treated group") +
+  theme(axis.title.y = element_text(size=15, vjust = 2))+
+  theme(axis.text.x = element_text(size = 14))+
+  theme(axis.text.y = element_text(size = 14))+
+  theme(plot.title = element_text(size=22, hjust = 0.5, vjust = -4))
+
+```
+
+Then we visualize specific condition to their respective controls. 
+
+1) LPS vs saline
+
+```{r message=FALSE, warning=FALSE,fig.align='center', fig.height=5, fig.width=8}
+#### 
+qPCR_pruned_2[qPCR_pruned_2$condition_fac=="LPS",] %>%
+  ggplot(aes(x = condition_fac, y=RQ_saline,fill=Sample_fac)) +
+  labs(x = " ")+
+  geom_errorbar(aes(ymin=RQ_min_saline, ymax=RQ_max_saline), width=.6,
+                position=position_dodge(.9))+
+  guides(fill = guide_legend(title = "Genes"))+
+  scale_y_continuous(limits=c(0,6), breaks = c(0,1,2,3,4,5,6))+
+  geom_bar(position="dodge", stat="identity",colour="black") +
+  geom_hline(yintercept = 1,linetype="dashed", color="Red", size=1.1)+
+  scale_y_continuous(limits = c(0,4), expand = c(0, 0)) +
+  theme_classic()+
+  ylab("Relative Quantification")+
+  ggtitle("qPCR analysis relative \n to the saline group") +
+  theme(axis.title.y = element_text(size=15, vjust = 2))+
+  theme(axis.text.x = element_text(size = 14))+
+  theme(axis.text.y = element_text(size = 14))+
+  theme(plot.title = element_text(size=22, hjust = 0.5, vjust = -4))
+```
+2) Dex, estradiol and progesterone vs MEOH
+
+```{r message=FALSE, warning=FALSE,fig.align='center', fig.height=6, fig.width=10}
+###
+qPCR_pruned_2[qPCR_pruned_2$condition_fac!="ETOH" & qPCR_pruned_2$condition_fac!="LPS" 
+              & qPCR_pruned_2$condition_fac!="MEOH" & qPCR_pruned_2$condition_fac!="DHT"
+              & qPCR_pruned_2$condition_fac!="saline"& qPCR_pruned_2$condition_fac!="NT",] %>%
+  ggplot(aes(x = fct_infreq(condition_fac), y=RQ_ETOH,fill=Sample_fac)) +
+  labs(x = " ")+
+  geom_errorbar(aes(ymin=RQ_min_ETOH, ymax=RQ_max_ETOH), width=.6,
+                position=position_dodge(.9))+
+  guides(fill = guide_legend(title = "Genes"))+
+  scale_y_continuous(limits=c(0,6), breaks = c(0,1,2,3,4,5,6))+
+  geom_bar(position="dodge", stat="identity",colour="black") +
+  geom_hline(yintercept = 1,linetype="dashed", color="Red", size=1.1)+
+  scale_y_continuous(limits = c(0,4), expand = c(0, 0)) +
+  theme_classic()+
+  ylab("Relative Quantification")+
+  ggtitle("qPCR analysis relative \n to the ETOH group") +
+  theme(axis.title.y = element_text(size=15, vjust = 2))+
+  theme(axis.text.x = element_text(size = 14))+
+  theme(axis.text.y = element_text(size = 14))+
+  theme(plot.title = element_text(size=22, hjust = 0.5, vjust = -4))
+```
+
+3) DHT vs MEOH
+
+```{r message=FALSE, warning=FALSE,fig.align='center', fig.height=5, fig.width=8}
+### 
+qPCR_pruned_2[qPCR_pruned_2$condition_fac!="ETOH" & qPCR_pruned_2$condition_fac!="LPS" 
+              & qPCR_pruned_2$condition_fac!="MEOH" & qPCR_pruned_2$condition_fac!="Dex"
+              & qPCR_pruned_2$condition_fac!="saline"& qPCR_pruned_2$condition_fac!="NT"
+              & qPCR_pruned_2$condition_fac!="progesterone"& qPCR_pruned_2$condition_fac!="estradiol",] %>%
+  ggplot(aes(x = fct_infreq(condition_fac), y=RQ_MEOH,fill=Sample_fac)) +
+  labs(x = " ")+
+  geom_errorbar(aes(ymin=RQ_min_MEOH, ymax=RQ_max_MEOH), width=.6,
+                position=position_dodge(.9))+
+  guides(fill = guide_legend(title = "Genes"))+
+  scale_y_continuous(limits=c(0,6), breaks = c(0,1,2,3,4,5,6))+
+  geom_bar(position="dodge", stat="identity",colour="black") +
+  geom_hline(yintercept = 1,linetype="dashed", color="Red", size=1.1)+
+  scale_y_continuous(limits = c(0,4), expand = c(0, 0)) +
+  theme_classic()+
+  ylab("Relative Quantification")+
+  ggtitle("qPCR analysis relative \n to the MEOH group") +
+  theme(axis.title.y = element_text(size=15, vjust = 2))+
+  theme(axis.text.x = element_text(size = 14))+
+  theme(axis.text.y = element_text(size = 14))+
+  theme(plot.title = element_text(size=22, hjust = 0.5, vjust = -4))
+```
+
+#### Statistical analysis
+
+##### Quality check
+
+This first step is to check the trend of quantification throughout the cycles. It 
+should have a negative slope (around -1). 
+
+```{r message=FALSE, warning=FALSE,fig.align='center', fig.height=5, fig.width=8}
+ggplot(qPCR_pruned_2,aes(x=log2(RQ_NT),y=mean, color=Sample))+
+  geom_point(size=2.5)+
+  geom_line(size=1)+
+  labs(title = " ",
+       x = "Log2 (Relative quantification to NT)",
+       y = "CT")+
+  scale_color_discrete(name="Gene")+
+  theme(axis.title.x = element_text(size=14))+
+  theme(axis.title.y = element_text(size=14, vjust = 2))+
+  theme(axis.text.x = element_text(size = 13))+
+  theme(axis.text.y = element_text(size = 13))+
+  theme(plot.title = element_text(size=14, face = "bold"), 
+        legend.text = element_text(size=13), 
+        legend.title =element_text(size=13, face = "bold"))+
+  theme_classic()
+```
+
+The curves kind of make sense (some would suggest to make an statistical test to see if 
+the slope is no signifcantly different from 0).
+
+
+##### Independent variable visualization
+
+Although we already checked the transformed data, given that the analyses will be 
+performed on the raw CT values, we want to check a little bit their distribution. 
+
+```{r message=FALSE, warning=FALSE,fig.align='center', fig.height=8, fig.width=12}
+# As usual we create a backup data.frame 
+qPCR_analysis <- qPCR
+# Factorize and establish an order for the gene and the condition levels
+qPCR_analysis$Sample_fac <- factor(qPCR_analysis$Sample, levels = c("GAPDH", "RPLP0", "FKBP5",
+                                                                    "GR","IFN","AR","ER","PR"))
+qPCR_analysis$condition_fac <- factor(qPCR_analysis$condition, levels = c("NT", "ETOH", "MEOH",
+                                                                    "saline","Dex","LPS","estradiol","DHT",
+                                                                    "progesterone"))
+# We add a control vs treatment variable for visualization
+qPCR_analysis$grouped_condition <- NA
+qPCR_analysis$grouped_condition[qPCR_analysis$condition_fac!="ETOH" & qPCR_analysis$condition_fac!="MEOH" 
+                                & qPCR_analysis$condition_fac!="saline"& qPCR_analysis$condition_fac!="NT"] <- "Treatment"
+qPCR_analysis$grouped_condition[is.na(qPCR_analysis$grouped_condition)] <- "Control"
+qPCR_analysis$for_geom <- paste0(qPCR_analysis$condition,"_",qPCR_analysis$Sample)
+# Create a boxplot for every gene
+ggplot(qPCR_analysis, aes(x=condition_fac, y=CT, color=Sample_fac ))+
+  geom_point(position = position_jitterdodge(dodge.width = 0.1,jitter.width = 0.1, jitter.height = 0.1),aes(group=Sample_fac))+
+  geom_boxplot(aes(x=condition_fac), position = position_dodge(0.1))+
+  geom_smooth(aes(group=Sample_fac))+
+    labs(title = " ",
+       x = "Condition",
+       y = "CT")+
+  scale_color_discrete(name="Gene")+theme_classic2()+
+  theme(axis.title.x = element_text(size=16, vjust = -1))+
+  theme(axis.title.y = element_text(size=16, vjust = 2))+
+  theme(axis.text.x = element_text(size = 15))+
+  theme(axis.text.y = element_text(size = 15))+
+  theme(plot.title = element_text(size=17, face = "bold"), 
+        legend.text = element_text(size=15), 
+        legend.title =element_text(size=16, face = "bold"))+
+  facet_wrap(~grouped_condition, scales = "free_x")+
+  theme(strip.text.x = element_text(size = 15))
+```
+
+As we can see, in general terms we see pretty much the same thing that we saw with
+the relative quantification plots. Dexamethasone lowers the FKBP5 curve, but the rest
+of conditions or genes do not seem to have a major effect. And there are no important
+differences between the control samples. 
+
+
+##### Multiple linear regression
+
+Now we proceed to make the formal analysis. First we will implement a multiple "fixed
+effect" linear model and then a more complex mixed linear model. Nonetheless, a more
+thorough analysis could be implemented if the distribution of CT was taking into account. 
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+#### Statistical analysis
+library(sjPlot)
+qPCR_analysis$C_ <- qPCR_analysis$condition_fac
+qPCR_analysis$G_ <- qPCR_analysis$Sample_fac
+# considering that relative quantification is not the measure per se I consider go with linear 
+# regression with the independent variable as Ct within each group
+
+# All vs NT
+lm_all <- lm(CT~C_*G_, qPCR_analysis[qPCR_analysis$C_!="ETOH" & qPCR_analysis$C_!="saline" & qPCR_analysis$C_!="MEOH",])
+```
+
+##### Multiple mixed linear regression 
+
+```{r message=FALSE, warning=FALSE}
+library(lme4)
+crossedmm <- lmer(CT ~ C_*G_ +
+                    (1|C_) +
+                    (1|G_),
+                  qPCR_analysis[qPCR_analysis$C_!="ETOH" & qPCR_analysis$C_!="saline" & qPCR_analysis$C_!="MEOH",])
+```
+
+
+```{r eval=F, message=FALSE, warning=FALSE}
+tab_model(lm_all, crossedmm,auto.label = F,CSS = list(css.centeralign = 'text-align: center;',
+                                              css.arc = 'color:blue;'))
+```
+
+
+<div align="center">
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=12, message=FALSE, warning=FALSE}
+tab_model(lm_all, crossedmm,auto.label = F, CSS = list(css.centeralign = 'text-align: center;'))
+```
+</div>
+
+
+###### Vs ETOH
+
+```{r message=FALSE, warning=FALSE}
+crossedmm_etoh <- lmer(CT ~ C_*G_ +
+                    (1|C_) +
+                    (1|G_),
+                  qPCR_analysis[qPCR_analysis$C_=="ETOH" | qPCR_analysis$C_=="Dex"| qPCR_analysis$C_=="estradiol"| qPCR_analysis$C_=="progesterone",])
+```
+
+```{r eval=F, message=FALSE, warning=FALSE}
+tab_model(crossedmm_etoh, auto.label = F, CSS = list(css.centeralign = 'text-align: center;'))
+```
+
+<div align="center">
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=12, message=FALSE, warning=FALSE}
+tab_model(crossedmm_etoh, auto.label = F, CSS = list(css.centeralign = 'text-align: center;'))
+```
+</div>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.height=7, fig.width=10}
+# Create a boxplot for every gene
+ggplot(qPCR_analysis[qPCR_analysis$C_=="ETOH" | qPCR_analysis$C_=="Dex"| qPCR_analysis$C_=="estradiol"| qPCR_analysis$C_=="progesterone",], aes(x=condition_fac, y=CT, color=Sample_fac ))+
+  geom_point(position = position_jitterdodge(dodge.width = 0.1,jitter.width = 0.1, jitter.height = 0.1),aes(group=Sample_fac))+
+  geom_boxplot(aes(x=condition_fac), position = position_dodge(0.1))+
+  geom_smooth(aes(group=Sample_fac), se = F)+
+    labs(title = " ",
+       x = "Condition",
+       y = "CT")+
+  scale_color_discrete(name="Gene")+theme_classic2()+
+  theme(axis.title.x = element_text(size=16, vjust = -1))+
+  theme(axis.title.y = element_text(size=16, vjust = 2))+
+  theme(axis.text.x = element_text(size = 15))+
+  theme(axis.text.y = element_text(size = 15))+
+  theme(plot.title = element_text(size=17, face = "bold"), 
+        legend.text = element_text(size=15), 
+        legend.title =element_text(size=16, face = "bold"))+
+  facet_wrap(~grouped_condition, scales = "free_x")+
+  theme(strip.text.x = element_text(size = 15))
+```
+
+###### Vs MEOH
+
+```{r}
+crossedmm_meoh <- lmer(CT ~ C_*G_ +
+                    (1|C_) +
+                    (1|G_),
+                  qPCR_analysis[qPCR_analysis$C_=="MEOH" | qPCR_analysis$C_=="DHT",])
+```
+
+```{r eval=F, message=FALSE, warning=FALSE}
+tab_model(crossedmm_meoh, auto.label = F, CSS = list(css.centeralign = 'text-align: center;'))
+```
+
+<div align="center">
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=12, message=FALSE, warning=FALSE}
+tab_model(crossedmm_meoh, auto.label = F, CSS = list(css.centeralign = 'text-align: center;'))
+```
+</div>
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.height=8, fig.width=10}
+# Create a boxplot for every gene
+ggplot(qPCR_analysis[qPCR_analysis$C_=="MEOH" | qPCR_analysis$C_=="DHT",], aes(x=condition_fac, y=CT, color=Sample_fac ))+
+  geom_point(position = position_jitterdodge(dodge.width = 0.1,jitter.width = 0.1, jitter.height = 0.1),aes(group=Sample_fac))+
+  geom_boxplot(aes(x=condition_fac), position = position_dodge(0.1))+
+  geom_smooth(aes(group=Sample_fac), se = F)+
+    labs(title = " ",
+       x = "Condition",
+       y = "CT")+
+  scale_color_discrete(name="Gene")+theme_classic2()+
+  theme(axis.title.x = element_text(size=16, vjust = -1))+
+  theme(axis.title.y = element_text(size=16, vjust = 2))+
+  theme(axis.text.x = element_text(size = 15))+
+  theme(axis.text.y = element_text(size = 15))+
+  theme(plot.title = element_text(size=17, face = "bold"), 
+        legend.text = element_text(size=15), 
+        legend.title =element_text(size=16, face = "bold"))+
+  facet_wrap(~grouped_condition, scales = "free_x")+
+  theme(strip.text.x = element_text(size = 15))
+```
+
+
+###### Vs saline
+
+```{r}
+crossedmm_saline <- lmer(CT ~ C_*G_ +
+                    (1|C_) +
+                    (1|G_), data = qPCR_analysis[qPCR_analysis$C_=="saline" | qPCR_analysis$C_=="LPS",])
+```
+
+```{r eval=F, message=FALSE, warning=FALSE}
+tab_model(crossedmm_saline, auto.label = F, CSS = list(css.centeralign = 'text-align: center;'))
+```
+
+<div align="center">
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=12, message=FALSE, warning=FALSE}
+tab_model(crossedmm_saline, auto.label = F, CSS = list(css.centeralign = 'text-align: center;'))
+```
+</div>
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.height=8, fig.width=10}
+# Create a boxplot for every gene
+ggplot(qPCR_analysis[qPCR_analysis$C_=="saline" | qPCR_analysis$C_=="LPS",], aes(x=condition_fac, y=CT, color=Sample_fac ))+
+  geom_point(position = position_jitterdodge(dodge.width = 0.1,jitter.width = 0.1, jitter.height = 0.1),aes(group=Sample_fac))+
+  geom_boxplot(aes(x=condition_fac), position = position_dodge(0.1))+
+  geom_smooth(aes(group=Sample_fac), se = F)+
+    labs(title = " ",
+       x = "Condition",
+       y = "CT")+
+  scale_color_discrete(name="Gene")+theme_classic2()+
+  theme(axis.title.x = element_text(size=16, vjust = -1))+
+  theme(axis.title.y = element_text(size=16, vjust = 2))+
+  theme(axis.text.x = element_text(size = 15))+
+  theme(axis.text.y = element_text(size = 15))+
+  theme(plot.title = element_text(size=17, face = "bold"), 
+        legend.text = element_text(size=15), 
+        legend.title =element_text(size=16, face = "bold"))+
+  facet_wrap(~grouped_condition, scales = "free_x")+
+  theme(strip.text.x = element_text(size = 15))
+```
+
+\
+
+### References
+
+
+```{r eval=FALSE, include=FALSE}
+
+##### Important basic math concepts #####
+#### Log and exponential #####
+log2(mean(ct[ct$condition=="Treatment",]$CT)/mean(ct[ct$condition=="Control",]$CT))
+log2(8)
+
+##### Case example #####
+set.seed(10)
+ct <- data.frame(CT=c(round(rnorm(8,16,1),1),round(rnorm(8,20,1),1),round(rnorm(8,16,1),1),round(rnorm(8,32,1),1)),
+                 condition=c(rep("Control",16),rep("Treatment",16)),
+                 gene=c(rep(c(rep("Housekeeping",8),rep("Target",8)),2)))
+
+ct$extra <- paste0(ct$condition, " - ",ct$gene)
+  
+ggplot(ct,aes(x=extra, y=CT, color=gene))+
+  geom_boxplot()+
+  geom_point(aes(x=extra))+
+  theme_classic()+
+  theme(text = element_text(size=18))+
+  theme(axis.text.x = element_text(size=10,angle=45, vjust = 0.5))+
+  facet_wrap(~condition, scales = "free_x")
+
+mean(ct[ct$extra=="Control - Housekeeping",]$CT)
+mean(ct[ct$extra=="Control - Target",]$CT)
+mean(ct[ct$extra=="Treatment - Housekeeping",]$CT)
+mean(ct[ct$extra=="Treatment - Target",]$CT)
+
+#### Definition of ratio
+mean(ct[ct$extra=="Control - Target",]$CT)/mean(ct[ct$extra=="Control - Housekeeping",]$CT)
+mean(ct[ct$extra=="Treatment - Target",]$CT)/mean(ct[ct$extra=="Treatment - Housekeeping",]$CT)
+          
+##### how 2^deldelta 
+deltadelat <- function(x){2^-(x)}
+deltafirst <- mean(ct[ct$extra=="Treatment - Target",]$CT)- mean(ct[ct$extra=="Treatment - Housekeeping",]$CT)
+deltasecond <- mean(ct[ct$extra=="Control - Target",]$CT)- mean(ct[ct$extra=="Control - Housekeeping",]$CT)
+deltadelta_example <- deltafirst-deltasecond -9
+
+2^-deltadelta_example
+
+
+deltadelat(3)
+set.seed(10)
+deltadeltas <- runif(100,-3,3)
+foldchanges <- deltadelat(deltadeltas)
+par(mfrow=c(2,1))
+hist(deltadeltas);hist(foldchanges)
+
+#### 
+
+
+
+
+##### Definition of CT #######
+
+
+#### old code 
+#### Comparisons with non-treated (NT)
+#ggplot(qPCR_pruned_2,aes(x=reorder(condition,-RQ_NT),y=RQ_NT, fill=reorder(Sample,-RQ_NT)))+
+#  geom_bar(position="dodge", stat="identity")
+qPCR_pruned_2[qPCR_pruned_2$condition!="NT" & qPCR_pruned_2$condition!="saline" ,] %>%
+  ggplot(aes(x = fct_infreq(condition), y=RQ_NT,fill=fct_reorder(Sample,RQ_NT))) +
+  labs(x = " ")+
+  geom_errorbar(aes(ymin=RQ_min_NT, ymax=RQ_max_NT), width=.6,
+                position=position_dodge(.9))+
+  guides(fill = guide_legend(title = "Genes"))+
+  geom_hline(yintercept = 1,linetype="dashed")+
+  scale_y_continuous(limits=c(0,6), breaks = c(0,1,2,3,4,5,6))+
+  geom_bar(position="dodge", stat="identity") +
+  theme(axis.title.y = element_text("Relative Quantification"))+
+  theme_classic()
+```
+
+\
+
